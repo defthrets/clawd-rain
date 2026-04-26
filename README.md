@@ -1,30 +1,31 @@
 # clawd-rain
 
-Matrix-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). Auto-detects clawd's JSONL log on the homelab and renders the agent's activity as **decoded streams** falling through digital rain.
+Matrix-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). **Every falling character is a real openclaw log line** — no random garbage. The rain effect comes from real telemetry scrolling fast enough to look like rain.
 
 ```
-ｦﾐ█ﾜ4ｴﾙｵﾈﾅxｲﾝﾊｦA│q░▒K%ｾｱｴｵﾜﾞﾝ7Eｲｸﾚﾊﾇｮ
-ﾐｶｱOﾉｦﾑｴﾐ&Hｿｮｲ█ﾐｴﾊ@ﾄｴｸﾞｦｬﾌﾆﾐﾑｦ7ｦﾈｸ
-   T              [               L
-   O              t               L
-   O              o               M
-   L              o
-   :              l                p
-   p              ]                =
-   r                                 1
-   e              p                  8
-   s              r                  9
-   e              e                  7
-   n              s
-   c              e
-   e              n
-[TOOL] [tool] presence_scanner.scan → 200 142ms
-[CHAN] [whatsapp] ← inbound text
+[                T                                            i
+T                E                  [                          n
+O                L                  C                          f
+O                E                  H                          e
+L                G                  A                          r
+]                R                  N                          e
+                 A                  ]                          n
+[                M                                             c
+t                ]                  [                          e
+o                                   t
+o                [                  e                          c
+l                t                  l                          l
+]                e                  e                          a
+                 l                  g                          u
+p                e                  r                          d
+[TOOL] [tool] presence_scanner.scan → 200 142ms args={"zone":"home"}
+[CHAN] [telegram] ← from:alice "hey clawd whats the weather"
 [LLM ] [model] inference claude-sonnet-4-6 p=1872 c=311
- ● connected · 27 ev/min · clawd · /tmp/openclaw/openclaw-2026-04-26.log     q quit · p pause
+[ERR ] [gateway] connection refused 127.0.0.1:7777
+ ● connected · 47 ev/min · clawd · /tmp/openclaw/openclaw-2026-04-26.log     q quit · p pause
 ```
 
-Decoded streams use **category colors** by openclaw subsystem:
+Each falling column is a complete log entry, rendered top-down with a brighter leader at the bottom. Streams use **category colors** by openclaw subsystem:
 
 | Kind | Color | Subsystems |
 |---|---|---|
@@ -134,6 +135,14 @@ systemctl --user restart openclaw-gateway
 For maximum verbosity (every internal step), use `"trace"`. Trace is loud — clawd-rain handles it fine, but the bottom log strip will scroll fast. Pause with `p` if you need to read.
 
 If `logging.redactSensitive` is on, leave it on — clawd-rain doesn't fight redaction. Tokens and credentials still get masked.
+
+## How the rain works
+
+Every column is a real log line. When clawd writes one, clawd-rain spawns a falling stream at a random x position; the text scrolls top-down (first char at the top, last char at the leader) at a randomised speed. Multiple streams running simultaneously at different speeds give the matrix-rain density.
+
+The volume of falling text scales with how chatty clawd is. With `info` logging it's a sparse drizzle. With `debug` (Telegram bodies, tool args, internal checks) it's proper rain. With `trace` it's a downpour — turn it on if you want to see literally every step the agent takes.
+
+If clawd is genuinely idle, the screen goes quiet. That's honest — clawd-rain doesn't fake activity with random characters.
 
 ## How it parses
 

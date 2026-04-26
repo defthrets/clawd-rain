@@ -1,7 +1,6 @@
 'use strict';
 
 const {
-  rainColor,
   decodedColor,
   fg,
   bg,
@@ -102,9 +101,7 @@ class Renderer {
           line += ' ';
           continue;
         }
-        const color = cell.decoded
-          ? decodedColor(cell.kind, cell.brightness, cell.isLeader)
-          : rainColor(cell.brightness, cell.isLeader);
+        const color = decodedColor(cell.kind, cell.brightness, cell.isLeader);
         if (color !== lastColor) {
           line += color;
           lastColor = color;
