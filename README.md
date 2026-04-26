@@ -1,87 +1,104 @@
-# openclaw-rain
+# clawd-rain
 
-Matrix-rain terminal viewer for the openclaw agent. Watches the agent's log/event stream and renders activity as **decoded streams** (real log lines) falling through digital rain, so you can confirm the agent is working — in hacker-aesthetic style.
+Matrix-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). Auto-detects clawd's JSONL log on the homelab and renders the agent's activity as **decoded streams** falling through digital rain.
 
 ```
 ｦﾐ█ﾜ4ｴﾙｵﾈﾅxｲﾝﾊｦA│q░▒K%ｾｱｴｵﾜﾞﾝ7Eｲｸﾚﾊﾇｮ
 ﾐｶｱOﾉｦﾑｴﾐ&Hｿｮｲ█ﾐｴﾊ@ﾄｴｸﾞｦｬﾌﾆﾐﾑｦ7ｦﾈｸ
-   T            S                       L
-   O            C                       L
-   O            A                       M
-   L            N                       
-   :            (                       p
-   p            )                       =
-   r                                    1
-   e                                    8
-   s                                    9
-   e                                    7
-   n                                    
-   c
-   e
-[TOOL] presence_scanner.scan() → 200 142ms
-[HTTP] GET /healthz → 200 4ms
-[LLM ] inference claude-sonnet-4-6 p=1872 c=311
- ● connected · 27 ev/min · clawd                       q quit · p pause
+   T              [               L
+   O              t               L
+   O              o               M
+   L              o
+   :              l                p
+   p              ]                =
+   r                                 1
+   e              p                  8
+   s              r                  9
+   e              e                  7
+   n              s
+   c              e
+   e              n
+[TOOL] [tool] presence_scanner.scan → 200 142ms
+[CHAN] [whatsapp] ← inbound text
+[LLM ] [model] inference claude-sonnet-4-6 p=1872 c=311
+ ● connected · 27 ev/min · clawd · /tmp/openclaw/openclaw-2026-04-26.log     q quit · p pause
 ```
 
-(Rain is green by default; decoded streams use category colors — cyan for tool, yellow for LLM, red for error, etc.)
+Decoded streams use **category colors** by openclaw subsystem:
+
+| Kind | Color | Subsystems |
+|---|---|---|
+| `TOOL` | cyan | `tool/*` |
+| `LLM` | yellow | `model`, `inference` |
+| `HTTP` | green-cyan | gateway HTTP entries |
+| `CHAN` | magenta | `whatsapp`, `telegram`, `slack`, etc. |
+| `MEM` | violet | `memory` |
+| `CRON` | orange | `cron`, `scheduler` |
+| `GATE` | pale cyan | `gateway` |
+| `SYS` | soft cyan | `agent`, `canvas`, `tailscale`, `auth` |
+| `WARN` | amber | `level=warn` |
+| `ERR` | red | `level=error` / `ok=false` / status≥400 |
+| `INFO` | white | everything else |
 
 ## Install
 
 ```sh
-git clone https://github.com/<your-github>/openclaw-rain.git
-cd openclaw-rain
-npm install -g .
+git clone https://github.com/defthrets/clawd-rain.git ~/clawd-rain
+cd ~/clawd-rain && npm install -g .
 ```
 
-No runtime dependencies — Node 18+ only.
+No runtime dependencies. Node 18+.
 
-## Usage
+## Run it
 
-It accepts log lines on stdin, from a file, or directly from a systemd unit. Every line is categorized (`tool`, `http`, `llm`, `error`, `warn`, `info`) and injected into the rain as a falling decoded stream.
-
-### Pipe anything into it
+Just:
 
 ```sh
-journalctl -u clawd -f --output=cat | openclaw-rain
-tail -F /var/log/clawd/agent.log | openclaw-rain
+clawd-rain
 ```
 
-### Tail a file directly
+That's it. Auto-detect probes (in order):
+
+1. `~/.openclaw/openclaw.json` → `logging.file` if you have a config override
+2. **systemd unit** matching `openclaw-gateway`, `openclaw`, or `clawd` (system, then user)
+3. `/tmp/openclaw/openclaw-YYYY-MM-DD.log` (the openclaw default — follows daily rotation automatically)
+4. `journalctl -t openclaw` (syslog identifier fallback)
+5. piped stdin
+
+### Check what it would attach to
 
 ```sh
-openclaw-rain --file /var/log/clawd/agent.log
+clawd-rain --explain
 ```
 
-Survives log rotation by reopening the file when the inode changes.
+Prints the chosen source plus the full probe list, and exits.
 
-### Follow a systemd unit directly
+### Force a specific source
 
 ```sh
-openclaw-rain --journal clawd
+clawd-rain --file /path/to/agent.log
+clawd-rain --journal openclaw-gateway
+some-cmd | clawd-rain
 ```
-
-Spawns `journalctl -u clawd --output=cat -f` internally and respawns it if it dies.
 
 ### Demo with a synthetic feed
 
 ```sh
-node test/demo-feed.js | node bin/openclaw-rain
-# or
 npm run demo
 ```
 
-This emits realistic-looking JSON events (tool calls, HTTP, LLM inference, errors) every ~220ms so you can see how the rain looks.
+Generates realistic openclaw-format JSONL events (tool calls, model inference, channel messages, errors) every ~220ms so you can see the rain in action without a real clawd running.
 
 ## Options
 
 | Flag | Description | Default |
 |---|---|---|
-| `--source <type>` | `stdin` \| `file` \| `journal` | inferred |
-| `--file <path>` | log file to tail | — |
-| `--journal <unit>` | systemd unit to follow | — |
+| `--file <path>` | tail an explicit log file | — |
+| `--journal <unit>` | follow a systemd unit (system, then user) | — |
+| `--source <type>` | force `stdin` \| `file` \| `journal` | auto-detect |
 | `--title <name>` | name shown in status bar | `clawd` |
 | `--frame-ms <n>` | frame interval (lower = smoother, more CPU) | `60` |
+| `--explain` | print what auto-detect would pick, then exit | — |
 | `-h`, `--help` | show help | — |
 
 ## Keys
@@ -91,36 +108,33 @@ This emits realistic-looking JSON events (tool calls, HTTP, LLM inference, error
 | `q` / `Ctrl+C` | quit |
 | `p` | pause / resume the rain |
 
-Note: when stdin is being used as the log source (i.e. data is piped in), the terminal can't capture keystrokes — use `Ctrl+C` to quit. In `--file` and `--journal` modes, the keys above work normally.
+When stdin is the log source, the terminal can't capture keystrokes — use `Ctrl+C` to quit. Other sources support all keys.
 
-## How it categorizes lines
+## How it parses
 
-The parser handles **JSON log lines** and **plain text**:
+Targets the openclaw JSONL schema directly: `time`, `level`, `subsystem`, `message`. Subsystem prefixes are mapped to colored kinds via [`src/parser.js`](src/parser.js). Falls back to a regex pass for plain-text lines like `[gateway] heartbeat ok` or `Exec presence_scanner.scan`. Emojis in messages (e.g. `🛠️ Exec:`) are stripped so the rain alignment stays clean.
 
-- **JSON**: looks at `level`, `status`, `tool`, `method`, `url`, `model`, `prompt_tokens`, `error`, `msg` etc. Any line starting with `{` is tried as JSON first.
-- **Plain text**: regex sniffs for `[ERROR]`, `[WARN]`, `tool: ...`, `GET /path`, `tokens`, `prompt`, `completion`, etc.
-
-Anything unmatched is shown as `[INFO]` in the dim white channel — still visible, just not colored as a specific category.
-
-If you want a different categorization, edit [`src/parser.js`](src/parser.js) — it's intentionally a single small file.
+If clawd writes a subsystem the parser doesn't know yet, it shows up as `INFO` — extend the `kindForSubsystem` switch in [`src/parser.js`](src/parser.js) to add new categories.
 
 ## File layout
 
 ```
-openclaw-rain/
-├── bin/openclaw-rain        # node shebang launcher
+clawd-rain/
+├── bin/clawd-rain           # node shebang launcher
 ├── src/
-│   ├── main.js              # entry: arg parsing, wiring
-│   ├── ingest.js            # stdin / file-tail / journalctl readers
-│   ├── parser.js            # categorize log lines → {kind, label, text}
-│   ├── rain.js              # rain engine (background columns + decoded streams)
+│   ├── main.js              # arg parsing, autodetect wiring
+│   ├── autodetect.js        # config / systemd / log-dir / journal probes
+│   ├── ingest.js            # stdin / file / glob (rotation) / journalctl
+│   ├── parser.js            # categorize JSONL + plain text
+│   ├── rain.js              # rain engine (background + decoded streams)
 │   ├── render.js            # frame loop, ANSI output, status bar
 │   └── chars.js             # character pool + 24-bit color helpers
-└── test/demo-feed.js        # synthetic feed for visual testing
+└── test/demo-feed.js        # synthetic openclaw-format feed
 ```
 
 ## Notes
 
-- Renders with **24-bit truecolor ANSI**. Most modern Linux terminals support this; older ones will show approximated colors.
-- Uses the **alternate screen buffer**, so quitting restores your original terminal contents.
-- Designed to live next to `clawd` on the homelab. Run it in its own SSH session/tmux pane.
+- 24-bit truecolor ANSI. Modern Linux terminals support it; older terminals will show approximated colors.
+- Uses the alternate screen buffer — quitting restores your original terminal contents.
+- Designed to run on the homelab next to clawd. SSH into the box and run it in tmux/screen.
+- File-tailing follows daily rotation: when `openclaw-2026-04-27.log` appears, clawd-rain switches to it without restart.
