@@ -110,6 +110,31 @@ Generates realistic openclaw-format JSONL events (tool calls, model inference, c
 
 When stdin is the log source, the terminal can't capture keystrokes — use `Ctrl+C` to quit. Other sources support all keys.
 
+## Capture *everything* clawd does
+
+clawd-rain only sees what clawd writes to the log. By default openclaw runs at `info` level, which means **Telegram message bodies, tool args/results, and most internal checks are hidden** (they live at `debug`).
+
+To see every chat, every check, every action, edit `~/.openclaw/openclaw.json` on the homelab:
+
+```json
+{
+  "logging": {
+    "level": "debug"
+  }
+}
+```
+
+Then restart the gateway:
+
+```sh
+systemctl --user restart openclaw-gateway
+# or whichever scope you installed under
+```
+
+For maximum verbosity (every internal step), use `"trace"`. Trace is loud — clawd-rain handles it fine, but the bottom log strip will scroll fast. Pause with `p` if you need to read.
+
+If `logging.redactSensitive` is on, leave it on — clawd-rain doesn't fight redaction. Tokens and credentials still get masked.
+
 ## How it parses
 
 Targets the openclaw JSONL schema directly: `time`, `level`, `subsystem`, `message`. Subsystem prefixes are mapped to colored kinds via [`src/parser.js`](src/parser.js). Falls back to a regex pass for plain-text lines like `[gateway] heartbeat ok` or `Exec presence_scanner.scan`. Emojis in messages (e.g. `🛠️ Exec:`) are stripped so the rain alignment stays clean.
@@ -134,6 +159,7 @@ clawd-rain/
 
 ## Notes
 
+- Layout is split 50/50: rain takes the top half of the terminal, the live log strip fills the bottom half (minus the 1-row status bar). Resize the terminal and the split adjusts.
 - 24-bit truecolor ANSI. Modern Linux terminals support it; older terminals will show approximated colors.
 - Uses the alternate screen buffer — quitting restores your original terminal contents.
 - Designed to run on the homelab next to clawd. SSH into the box and run it in tmux/screen.
