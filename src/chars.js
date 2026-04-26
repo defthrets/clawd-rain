@@ -55,8 +55,13 @@ function rainColor(brightness, isLeader) {
 
 function decodedColor(kind, brightness, isLeader) {
   const c = KIND_COLOR[kind] || KIND_COLOR.unknown;
-  if (isLeader) return BOLD + fg(255, 255, 255);
-  const b = Math.max(0.25, Math.min(1, brightness));
+  if (isLeader) {
+    const r = Math.min(255, Math.round(c[0] * 0.5 + 255 * 0.5));
+    const g = Math.min(255, Math.round(c[1] * 0.5 + 255 * 0.5));
+    const b = Math.min(255, Math.round(c[2] * 0.5 + 255 * 0.5));
+    return BOLD + fg(r, g, b);
+  }
+  const b = Math.max(0.2, Math.min(1, brightness));
   const r = Math.round(c[0] * b);
   const g = Math.round(c[1] * b);
   const bl = Math.round(c[2] * b);

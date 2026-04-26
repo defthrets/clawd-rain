@@ -1,7 +1,7 @@
 {
   "name": "clawd-rain",
-  "version": "0.2.0",
-  "description": "Matrix-rain terminal viewer for the openclaw agent. Auto-detects clawd's JSONL log and renders the agent's activity as decoded streams falling through digital rain.",
+  "version": "0.3.0",
+  "description": "Matrix-rain terminal viewer for the openclaw agent. Every falling character is a real openclaw log line — no random garbage, just telemetry rendered fast enough to look like rain.",
   "bin": {
     "clawd-rain": "bin/clawd-rain"
   },
