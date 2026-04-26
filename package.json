@@ -1,0 +1,31 @@
+{
+  "name": "openclaw-rain",
+  "version": "0.1.0",
+  "description": "Matrix-rain terminal viewer for the openclaw agent. Watches the agent's log/event stream and renders activity as decoded streams falling through digital rain.",
+  "bin": {
+    "openclaw-rain": "bin/openclaw-rain"
+  },
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bin/openclaw-rain",
+    "demo": "node test/demo-feed.js | node bin/openclaw-rain"
+  },
+  "keywords": [
+    "openclaw",
+    "clawd",
+    "matrix",
+    "tui",
+    "monitoring",
+    "agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
+}
