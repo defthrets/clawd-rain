@@ -66,10 +66,43 @@ const LABELS = {
   unknown: '... ',
 };
 
+function pickBody(obj) {
+  const candidates = [obj.message, obj.msg, obj.text, obj.body, obj.content, obj.caption];
+  for (const c of candidates) if (typeof c === 'string' && c) return c;
+  return '';
+}
+
+function pickSender(obj) {
+  const fields = ['from', 'sender', 'username', 'user', 'chat', 'chat_id', 'chatId', 'peer', 'jid'];
+  for (const f of fields) {
+    const v = obj[f];
+    if (typeof v === 'string' && v) return v;
+    if (v && typeof v === 'object') {
+      const inner = v.username || v.name || v.title || v.id;
+      if (typeof inner === 'string' && inner) return inner;
+    }
+  }
+  return '';
+}
+
+function quoteShort(s, max = 80) {
+  if (!s) return '';
+  const flat = String(s).replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return `"${flat}"`;
+  return `"${flat.slice(0, max - 1)}…"`;
+}
+
+function ellipsize(s, max) {
+  if (!s) return '';
+  const flat = String(s).replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  return flat.slice(0, max - 1) + '…';
+}
+
 function categorizeOpenClaw(obj) {
   const level = String(obj.level || obj.lvl || obj.severity || '').toLowerCase();
   const subsystem = obj.subsystem || obj.sub || obj.module || obj.component || '';
-  const message = stripEmoji(obj.message || obj.msg || obj.text || '');
+  const message = stripEmoji(pickBody(obj));
 
   let kind = kindForSubsystem(subsystem);
 
@@ -104,8 +137,17 @@ function formatBody(kind, subsystem, message, obj) {
     const status = obj.status || obj.statusCode;
     const code = status ? ` → ${status}` : '';
     const ms = dur ? ` ${Math.round(Number(dur))}ms` : '';
-    if (tool) return `${subTag}${tool}${action ? '.' + action : ''}${code}${ms}`.trim();
-    return `${subTag}${message}${ms}`.trim();
+    const args = obj.args || obj.params || obj.input;
+    const result = obj.result || obj.output || obj.response;
+    let extra = '';
+    if (args && typeof args === 'object') extra += ` args=${ellipsize(JSON.stringify(args), 60)}`;
+    else if (typeof args === 'string') extra += ` args=${quoteShort(args, 60)}`;
+    if (result !== undefined) {
+      if (result && typeof result === 'object') extra += ` result=${ellipsize(JSON.stringify(result), 60)}`;
+      else extra += ` result=${quoteShort(String(result), 60)}`;
+    }
+    if (tool) return `${subTag}${tool}${action ? '.' + action : ''}${code}${ms}${extra}`.trim();
+    return `${subTag}${message}${ms}${extra}`.trim();
   }
   if (kind === 'http') {
     const method = obj.method;
@@ -128,7 +170,10 @@ function formatBody(kind, subsystem, message, obj) {
   if (kind === 'channel') {
     const dir = obj.direction || (subsystem.includes('/outbound') ? 'out' : subsystem.includes('/inbound') ? 'in' : '');
     const arrow = dir === 'out' ? '→' : dir === 'in' ? '←' : '·';
-    return `${subTag}${arrow} ${message}`.trim();
+    const sender = pickSender(obj);
+    const who = sender ? (dir === 'out' ? `to:${sender} ` : `from:${sender} `) : '';
+    const body = message ? quoteShort(message, 200) : '';
+    return `${subTag}${arrow} ${who}${body}`.trim();
   }
   return `${subTag}${message || compactJson(obj)}`.trim();
 }

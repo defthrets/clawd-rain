@@ -17,8 +17,19 @@ const {
   KIND_COLOR,
 } = require('./chars');
 
-const STATUS_ROWS = 4;
-const LOG_ROWS = STATUS_ROWS - 1;
+const STATUS_BAR_ROWS = 1;
+const RAIN_FRACTION = 0.5;
+
+function layout(totalH) {
+  const total = Math.max(6, totalH);
+  const rainH = Math.max(3, Math.floor(total * RAIN_FRACTION));
+  const logH = Math.max(1, total - rainH - STATUS_BAR_ROWS);
+  return { rainH, logH, statusH: STATUS_BAR_ROWS, totalH: total };
+}
+
+function rainHeightFor(totalH) {
+  return layout(totalH).rainH;
+}
 
 class Renderer {
   constructor(rain, opts = {}) {
@@ -33,6 +44,7 @@ class Renderer {
     this.paused = false;
     this._timer = null;
     this._lastFrame = '';
+    this._layout = layout(process.stdout.rows || 24);
   }
 
   start() {
@@ -54,13 +66,15 @@ class Renderer {
   pushEvent(evt) {
     this.eventCount++;
     this.recent.push({ ...evt, t: Date.now() });
-    if (this.recent.length > 32) this.recent.shift();
+    const cap = Math.max(64, (this._layout?.logH || 4) * 8);
+    if (this.recent.length > cap) this.recent.shift();
   }
 
   _onResize() {
     const w = process.stdout.columns || 80;
     const h = process.stdout.rows || 24;
-    this.rain.resize(w, h - STATUS_ROWS);
+    this._layout = layout(h);
+    this.rain.resize(w, this._layout.rainH);
     process.stdout.write(CLEAR_SCREEN + HOME);
     this._lastFrame = '';
   }
@@ -72,8 +86,8 @@ class Renderer {
 
   _render() {
     const w = this.rain.width;
-    const rainH = this.rain.height;
-    const totalH = rainH + STATUS_ROWS;
+    const { rainH, logH } = this._layout;
+    const totalH = rainH + logH + STATUS_BAR_ROWS;
 
     let out = HOME;
 
@@ -100,19 +114,19 @@ class Renderer {
       out += line + RESET;
     }
 
-    out += this._renderLogStrip(rainH, w);
+    out += this._renderLogStrip(rainH, w, logH);
     out += this._renderStatusBar(totalH, w);
 
     process.stdout.write(out);
   }
 
-  _renderLogStrip(startY, width) {
-    const recent = this.recent.slice(-LOG_ROWS);
+  _renderLogStrip(startY, width, logRows) {
+    const recent = this.recent.slice(-logRows);
     let out = '';
-    for (let i = 0; i < LOG_ROWS; i++) {
+    for (let i = 0; i < logRows; i++) {
       const row = startY + 1 + i;
       out += moveTo(row, 1);
-      const evt = recent[recent.length - LOG_ROWS + i];
+      const evt = recent[recent.length - logRows + i];
       if (!evt) {
         out += RESET + ' '.repeat(width);
         continue;
@@ -155,4 +169,4 @@ function truncate(s, max) {
   return '…' + s.slice(s.length - max + 1);
 }
 
-module.exports = { Renderer, STATUS_ROWS };
+module.exports = { Renderer, layout, rainHeightFor };

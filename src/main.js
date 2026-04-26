@@ -2,7 +2,7 @@
 
 const { parseArgs } = require('node:util');
 const { Rain } = require('./rain');
-const { Renderer, STATUS_ROWS } = require('./render');
+const { Renderer, rainHeightFor } = require('./render');
 const { fromOptions, fromDetected } = require('./ingest');
 const { categorize } = require('./parser');
 const autodetect = require('./autodetect');
@@ -120,7 +120,7 @@ function main() {
 
   const w = process.stdout.columns || 80;
   const h = process.stdout.rows || 24;
-  const rain = new Rain(w, Math.max(4, h - STATUS_ROWS));
+  const rain = new Rain(w, rainHeightFor(h));
   const renderer = new Renderer(rain, {
     title: opts.title,
     source: sourceLabel,
