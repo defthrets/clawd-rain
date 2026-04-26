@@ -24,6 +24,7 @@ class Renderer {
   constructor(rain, opts = {}) {
     this.rain = rain;
     this.title = opts.title || 'clawd';
+    this.source = opts.source || '';
     this.frameMs = opts.frameMs || 60;
     this.recent = [];
     this.eventCount = 0;
@@ -134,16 +135,24 @@ class Renderer {
     const rate = elapsed > 0 ? Math.round((this.eventCount / elapsed) * 60) : 0;
     const dot = this.connected ? fg(0, 255, 100) + '●' : fg(255, 80, 80) + '●';
     const status = this.connected ? 'connected' : 'waiting';
+    const sourceText = this.source ? truncate(this.source, Math.max(12, Math.floor(width * 0.35))) : '';
     const left = ` ${dot}${RESET} ${fg(180, 220, 180)}${status}${RESET}` +
       `${fg(80, 140, 80)} · ${RESET}${fg(220, 230, 220)}${rate} ev/min${RESET}` +
-      `${fg(80, 140, 80)} · ${RESET}${fg(0, 255, 200)}${this.title}${RESET}`;
+      `${fg(80, 140, 80)} · ${RESET}${fg(0, 255, 200)}${this.title}${RESET}` +
+      (sourceText ? `${fg(80, 140, 80)} · ${RESET}${fg(160, 200, 160)}${sourceText}${RESET}` : '');
     const right = `${fg(120, 160, 120)}q quit · p pause${this.paused ? ' [PAUSED]' : ''}${RESET} `;
-    const visibleLeft = ` ● ${status} · ${rate} ev/min · ${this.title}`;
+    const visibleLeft = ` ● ${status} · ${rate} ev/min · ${this.title}` + (sourceText ? ` · ${sourceText}` : '');
     const visibleRight = `q quit · p pause${this.paused ? ' [PAUSED]' : ''} `;
     const padLen = Math.max(1, width - visibleLeft.length - visibleRight.length);
     const barBg = bg(0, 25, 5);
     return moveTo(totalH, 1) + barBg + left + ' '.repeat(padLen) + right + RESET;
   }
+}
+
+function truncate(s, max) {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  return '…' + s.slice(s.length - max + 1);
 }
 
 module.exports = { Renderer, STATUS_ROWS };
