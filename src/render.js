@@ -17,13 +17,14 @@ const {
 } = require('./chars');
 
 const STATUS_BAR_ROWS = 1;
+const CHAT_ROW_ROWS = 1;
 const RAIN_FRACTION = 0.5;
 
 function layout(totalH) {
-  const total = Math.max(6, totalH);
+  const total = Math.max(7, totalH);
   const rainH = Math.max(3, Math.floor(total * RAIN_FRACTION));
-  const logH = Math.max(1, total - rainH - STATUS_BAR_ROWS);
-  return { rainH, logH, statusH: STATUS_BAR_ROWS, totalH: total };
+  const logH = Math.max(1, total - rainH - CHAT_ROW_ROWS - STATUS_BAR_ROWS);
+  return { rainH, logH, chatH: CHAT_ROW_ROWS, statusH: STATUS_BAR_ROWS, totalH: total };
 }
 
 function rainHeightFor(totalH) {
@@ -36,6 +37,8 @@ class Renderer {
     this.title = opts.title || 'clawd';
     this.source = opts.source || '';
     this.frameMs = opts.frameMs || 60;
+    this.chat = opts.chat || null;
+    this.chatEnabled = !!opts.chatEnabled;
     this.recent = [];
     this.eventCount = 0;
     this.windowStart = Date.now();
@@ -85,8 +88,8 @@ class Renderer {
 
   _render() {
     const w = this.rain.width;
-    const { rainH, logH } = this._layout;
-    const totalH = rainH + logH + STATUS_BAR_ROWS;
+    const { rainH, logH, chatH } = this._layout;
+    const totalH = rainH + logH + chatH + STATUS_BAR_ROWS;
 
     let out = HOME;
 
@@ -112,6 +115,7 @@ class Renderer {
     }
 
     out += this._renderLogStrip(rainH, w, logH);
+    out += this._renderChatRow(rainH + logH + 1, w);
     out += this._renderStatusBar(totalH, w);
 
     process.stdout.write(out);
@@ -141,6 +145,50 @@ class Renderer {
     return out;
   }
 
+  _renderChatRow(rowY, width) {
+    let out = moveTo(rowY, 1);
+    const chat = this.chat;
+
+    if (chat && chat.focused) {
+      const promptStr = '> ';
+      const promptColored = fg(0, 255, 200) + BOLD + promptStr + RESET;
+      const usable = Math.max(8, width - promptStr.length - 1);
+      let buf = chat.buffer;
+      let cursor = chat.cursor;
+      if (buf.length >= usable) {
+        const overflow = buf.length - usable + 1;
+        buf = buf.slice(overflow);
+        cursor = Math.max(0, cursor - overflow);
+      }
+      const before = buf.slice(0, cursor);
+      const at = buf.slice(cursor, cursor + 1) || ' ';
+      const after = buf.slice(cursor + 1);
+      const inputColored = fg(220, 240, 220) + before + RESET +
+        bg(120, 220, 255) + fg(0, 0, 0) + at + RESET +
+        fg(220, 240, 220) + after + RESET;
+      const usedLen = promptStr.length + buf.length + (cursor >= buf.length ? 1 : 0);
+      const pad = Math.max(0, width - usedLen);
+      out += promptColored + inputColored + ' '.repeat(pad);
+      return out;
+    }
+
+    let hint = '';
+    if (chat && chat.lastError) {
+      hint = `${fg(255, 100, 100)}chat error: ${chat.lastError}${RESET}`;
+    } else if (chat && chat.busy) {
+      hint = `${fg(180, 220, 180)}sending…${RESET}`;
+    } else if (chat && chat.lastSent) {
+      hint = `${fg(100, 200, 200)}→ sent: ${truncate(chat.lastSent, Math.max(20, width - 30))}${RESET}`;
+    } else if (this.chatEnabled) {
+      hint = `${fg(100, 160, 100)} / chat with clawd · q quit · p pause${RESET}`;
+    } else {
+      hint = `${fg(80, 100, 80)} chat disabled — pass --chat-agent <id> or --chat-cmd "<cmd>"${RESET}`;
+    }
+    const visibleLen = stripAnsi(hint).length;
+    const pad = Math.max(0, width - visibleLen);
+    return out + hint + ' '.repeat(pad);
+  }
+
   _renderStatusBar(totalH, width) {
     const elapsed = (Date.now() - this.windowStart) / 1000;
     const rate = elapsed > 0 ? Math.round((this.eventCount / elapsed) * 60) : 0;
@@ -151,9 +199,10 @@ class Renderer {
       `${fg(80, 140, 80)} · ${RESET}${fg(220, 230, 220)}${rate} ev/min${RESET}` +
       `${fg(80, 140, 80)} · ${RESET}${fg(0, 255, 200)}${this.title}${RESET}` +
       (sourceText ? `${fg(80, 140, 80)} · ${RESET}${fg(160, 200, 160)}${sourceText}${RESET}` : '');
-    const right = `${fg(120, 160, 120)}q quit · p pause${this.paused ? ' [PAUSED]' : ''}${RESET} `;
+    const rightHint = this.paused ? ' [PAUSED]' : '';
+    const right = `${fg(120, 160, 120)}enter send · esc cancel${rightHint}${RESET} `;
     const visibleLeft = ` ● ${status} · ${rate} ev/min · ${this.title}` + (sourceText ? ` · ${sourceText}` : '');
-    const visibleRight = `q quit · p pause${this.paused ? ' [PAUSED]' : ''} `;
+    const visibleRight = `enter send · esc cancel${rightHint} `;
     const padLen = Math.max(1, width - visibleLeft.length - visibleRight.length);
     const barBg = bg(0, 25, 5);
     return moveTo(totalH, 1) + barBg + left + ' '.repeat(padLen) + right + RESET;
@@ -164,6 +213,10 @@ function truncate(s, max) {
   if (!s) return '';
   if (s.length <= max) return s;
   return '…' + s.slice(s.length - max + 1);
+}
+
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 module.exports = { Renderer, layout, rainHeightFor };
