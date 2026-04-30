@@ -1,10 +1,11 @@
 # clawd-rain
 
-Hacker-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). Watches three live sources at once and renders them as falling text:
+Hacker-rain terminal viewer **and chat client** for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). Watches every live source at once and renders them as falling text:
 
 - **Every shell command** clawd spawns (live from `/proc/<pid>/task/*/children`)
 - **Every TCP connection** clawd or its children open (live from `ss -tnp`)
 - **Every log entry** from openclaw's JSONL (tools, LLM inference, channel messages)
+- **Your own messages**, sent via the built-in chat input — replies stream back through the log
 
 No random characters — every falling glyph is a real piece of telemetry.
 
@@ -119,10 +120,48 @@ Generates realistic openclaw-format JSONL events (tool calls, model inference, c
 | `--watch-pid <pid>` | watch this PID for spawned procs + TCP conns | auto-detect |
 | `--no-watch` | disable proc/net watching even if a PID is found | — |
 | `--watch-ms <n>` | proc/net poll interval in ms | `750` |
+| `--chat-agent <id>` | enable chat input via `openclaw agent --agent <id>` | — |
+| `--chat-cmd <cmd>` | enable chat input via custom command (text appended as last argv) | — |
 | `--title <name>` | name shown in status bar | `clawd` |
 | `--frame-ms <n>` | frame interval (lower = smoother, more CPU) | `60` |
 | `--explain` | print what auto-detect would pick, then exit | — |
 | `-h`, `--help` | show help | — |
+
+## Chat with clawd
+
+clawd-rain has a built-in chat input bar at the bottom of the screen. Press `/` (or `c`) to focus it, type a message, press `Enter` to send. The default sender shells out to:
+
+```sh
+openclaw agent --agent <id> --deliver --message "<your text>"
+```
+
+Pass `--chat-agent <id>` to enable it:
+
+```sh
+clawd-rain --chat-agent default
+```
+
+When you send, you see your message echoed in the rain as a `[CHAT] [me] → "..."` stream. The agent's reply flows back through the openclaw log — clawd-rain is already tailing it, so the response shows up automatically as a `[CHAN]` stream a moment later. One terminal, full conversation loop.
+
+For full control over the transport, use `--chat-cmd` instead — clawd-rain shell-splits the value, then appends your message text as the final argv. Handy for hitting the gateway HTTP API directly:
+
+```sh
+clawd-rain --chat-cmd 'curl -sS -H "Authorization: Bearer $TOKEN" \
+  -X POST http://localhost:18789/v1/chat/completions -d'
+```
+
+Chat keys (only when input is focused):
+
+| Key | Action |
+|---|---|
+| `/` or `c` | focus the chat input |
+| `Enter` | send the message |
+| `Esc` | cancel and unfocus |
+| `↑` / `↓` | browse recent messages |
+| `←` / `→` | move cursor in buffer |
+| `Backspace` | delete previous char |
+| `Ctrl+A` / `Ctrl+E` | jump to start / end |
+| `Ctrl+U` | clear text before cursor |
 
 ## Keys
 
@@ -130,6 +169,7 @@ Generates realistic openclaw-format JSONL events (tool calls, model inference, c
 |---|---|
 | `q` / `Ctrl+C` | quit |
 | `p` | pause / resume the rain |
+| `/` or `c` | focus chat input (when chat is enabled) |
 
 When stdin is the log source, the terminal can't capture keystrokes — use `Ctrl+C` to quit. Other sources support all keys.
 
@@ -202,6 +242,7 @@ clawd-rain/
 │   ├── autodetect.js        # config / systemd / log-dir / journal probes
 │   ├── ingest.js            # stdin / file / glob (rotation) / journalctl
 │   ├── proc-watch.js        # /proc child-tree + ss TCP conn polling
+│   ├── chat.js              # ChatInput state machine (focus, buffer, history)
 │   ├── parser.js            # categorize JSONL + plain text
 │   ├── rain.js              # falling-stream engine (real text, no garbage)
 │   ├── render.js            # frame loop, ANSI output, status bar
