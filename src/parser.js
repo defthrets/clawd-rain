@@ -46,6 +46,8 @@ function kindForSubsystem(sub) {
   if (root === 'gateway') return 'gateway';
   if (root === 'agent' || root === 'agents' || root === 'loop') return 'system';
   if (root === 'canvas' || root === 'tailscale' || root === 'auth') return 'system';
+  if (root === 'shell' || root === 'exec' || root === 'proc' || root === 'spawn') return 'shell';
+  if (root === 'net' || root === 'tcp' || root === 'connection' || root === 'conn') return 'net';
   if (CHANNEL_NAMES.has(root)) return 'channel';
   return null;
 }
@@ -62,6 +64,8 @@ const LABELS = {
   webhook: 'HOOK',
   gateway: 'GATE',
   system:  'SYS ',
+  shell:   'SHEL',
+  net:     'NET ',
   info:    'INFO',
   unknown: '... ',
 };
@@ -174,6 +178,21 @@ function formatBody(kind, subsystem, message, obj) {
     const who = sender ? (dir === 'out' ? `to:${sender} ` : `from:${sender} `) : '';
     const body = message ? quoteShort(message, 200) : '';
     return `${subTag}${arrow} ${who}${body}`.trim();
+  }
+  if (kind === 'shell') {
+    const cmd = obj.cmd || obj.command || obj.argv || message;
+    const pidTag = obj.pid ? `[${obj.pid}] ` : '';
+    return `${subTag}${pidTag}$ ${ellipsize(String(cmd || ''), 180)}`.trim();
+  }
+  if (kind === 'net') {
+    const peer = obj.peer || obj.remote || obj.dst || '';
+    const local = obj.local || obj.src || '';
+    const state = obj.state || '';
+    const dir = obj.direction || 'out';
+    const arrow = dir === 'out' ? '→' : '←';
+    const stateTag = state ? ` (${state})` : '';
+    const localPart = local ? ` ${local} ${arrow} ` : ` ${arrow} `;
+    return `${subTag}${localPart.trim()} ${peer}${stateTag}`.replace(/\s+/g, ' ').trim();
   }
   return `${subTag}${message || compactJson(obj)}`.trim();
 }

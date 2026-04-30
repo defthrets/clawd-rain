@@ -1,6 +1,12 @@
 # clawd-rain
 
-Matrix-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). **Every falling character is a real openclaw log line** — no random garbage. The rain effect comes from real telemetry scrolling fast enough to look like rain.
+Hacker-rain terminal viewer for the [openclaw](https://github.com/openclaw/openclaw) agent (clawd). Watches three live sources at once and renders them as falling text:
+
+- **Every shell command** clawd spawns (live from `/proc/<pid>/task/*/children`)
+- **Every TCP connection** clawd or its children open (live from `ss -tnp`)
+- **Every log entry** from openclaw's JSONL (tools, LLM inference, channel messages)
+
+No random characters — every falling glyph is a real piece of telemetry.
 
 ```
 [                T                                            i
@@ -29,6 +35,8 @@ Each falling column is a complete log entry, rendered top-down with a brighter l
 
 | Kind | Color | Subsystems |
 |---|---|---|
+| `SHEL` | lime | every shell command clawd spawns (live from `/proc`) |
+| `NET` | blue | every TCP connection clawd opens (live from `ss`) |
 | `TOOL` | cyan | `tool/*` |
 | `LLM` | yellow | `model`, `inference` |
 | `HTTP` | green-cyan | gateway HTTP entries |
@@ -58,13 +66,24 @@ Just:
 clawd-rain
 ```
 
-That's it. Auto-detect probes (in order):
+That's it. clawd-rain runs **three sources at once**, all merged into the same falling rain:
 
+**Log source** — auto-detected:
 1. `~/.openclaw/openclaw.json` → `logging.file` if you have a config override
 2. **systemd unit** matching `openclaw-gateway`, `openclaw`, or `clawd` (system, then user)
 3. `/tmp/openclaw/openclaw-YYYY-MM-DD.log` (the openclaw default — follows daily rotation automatically)
 4. `journalctl -t openclaw` (syslog identifier fallback)
 5. piped stdin
+
+**Process watch** — every shell command clawd spawns. Auto-detected via:
+1. `pgrep -f openclaw-gateway` / `openclaw` / `clawd`
+2. `systemctl show openclaw-gateway -p MainPID`
+
+Walks `/proc/<pid>/task/*/children` recursively every 750ms and emits a `SHEL` stream for every new descendant process: `[shell] [12345] $ curl -sS https://api.anthropic.com/v1/messages`.
+
+**Network watch** — every TCP connection clawd or its children open. Runs `ss -tnpH` every 750ms, filters by clawd's PID and descendants, diffs against the last snapshot, and emits a `NET` stream for every new socket: `[net] 10.0.0.5:54012 → 104.18.27.92:443 (ESTAB)`. Closed sockets show as `(CLOSED)`.
+
+Requires `pgrep`, `ps`, and `ss` (standard procps-ng + iproute2 — present on every Linux distro). On macOS or non-Linux, proc/net watching is silently skipped and clawd-rain falls back to log-only.
 
 ### Check what it would attach to
 
@@ -97,6 +116,9 @@ Generates realistic openclaw-format JSONL events (tool calls, model inference, c
 | `--file <path>` | tail an explicit log file | — |
 | `--journal <unit>` | follow a systemd unit (system, then user) | — |
 | `--source <type>` | force `stdin` \| `file` \| `journal` | auto-detect |
+| `--watch-pid <pid>` | watch this PID for spawned procs + TCP conns | auto-detect |
+| `--no-watch` | disable proc/net watching even if a PID is found | — |
+| `--watch-ms <n>` | proc/net poll interval in ms | `750` |
 | `--title <name>` | name shown in status bar | `clawd` |
 | `--frame-ms <n>` | frame interval (lower = smoother, more CPU) | `60` |
 | `--explain` | print what auto-detect would pick, then exit | — |
@@ -144,6 +166,26 @@ The volume of falling text scales with how chatty clawd is. With `info` logging 
 
 If clawd is genuinely idle, the screen goes quiet. That's honest — clawd-rain doesn't fake activity with random characters.
 
+### Caveats on proc/net polling
+
+The proc/net watcher is **polling-based at 750ms** (configurable). Implications:
+
+- **Short-lived commands may be missed.** A shell command that runs and exits in under 750ms (`true`, `pwd`, etc.) won't appear. Drop the interval (`--watch-ms 250`) for finer resolution at the cost of CPU.
+- **For lossless capture**, layer in `auditd` or eBPF and pipe it into clawd-rain via stdin. Quick recipes:
+
+  ```sh
+  # auditd: catch every execve from clawd's user
+  sudo auditctl -a always,exit -F arch=b64 -S execve -F auid=$(id -u clawd) -k clawd_exec
+  sudo ausearch -k clawd_exec --format text -i | clawd-rain   # already-recorded
+  # for live tail you'd post-process /var/log/audit/audit.log
+
+  # bpftrace (kernel-level, real-time, every execve and connect):
+  sudo bpftrace -e 'tracepoint:syscalls:sys_enter_execve { printf("{\"subsystem\":\"shell\",\"pid\":%d,\"cmd\":\"%s\"}\n", pid, str(args->filename)); }' \
+    | clawd-rain --no-watch --source stdin
+  ```
+
+  These give you every syscall, not just snapshots. Polling is just the zero-config default.
+
 ## How it parses
 
 Targets the openclaw JSONL schema directly: `time`, `level`, `subsystem`, `message`. Subsystem prefixes are mapped to colored kinds via [`src/parser.js`](src/parser.js). Falls back to a regex pass for plain-text lines like `[gateway] heartbeat ok` or `Exec presence_scanner.scan`. Emojis in messages (e.g. `🛠️ Exec:`) are stripped so the rain alignment stays clean.
@@ -156,14 +198,15 @@ If clawd writes a subsystem the parser doesn't know yet, it shows up as `INFO` �
 clawd-rain/
 ├── bin/clawd-rain           # node shebang launcher
 ├── src/
-│   ├── main.js              # arg parsing, autodetect wiring
+│   ├── main.js              # arg parsing, autodetect wiring, multi-source merge
 │   ├── autodetect.js        # config / systemd / log-dir / journal probes
 │   ├── ingest.js            # stdin / file / glob (rotation) / journalctl
+│   ├── proc-watch.js        # /proc child-tree + ss TCP conn polling
 │   ├── parser.js            # categorize JSONL + plain text
-│   ├── rain.js              # rain engine (background + decoded streams)
+│   ├── rain.js              # falling-stream engine (real text, no garbage)
 │   ├── render.js            # frame loop, ANSI output, status bar
-│   └── chars.js             # character pool + 24-bit color helpers
-└── test/demo-feed.js        # synthetic openclaw-format feed
+│   └── chars.js             # 24-bit color helpers + per-kind palette
+└── test/demo-feed.js        # synthetic feed covering all 10 kinds
 ```
 
 ## Notes

@@ -6,43 +6,61 @@ const { Renderer, rainHeightFor } = require('./render');
 const { fromOptions, fromDetected } = require('./ingest');
 const { categorize } = require('./parser');
 const autodetect = require('./autodetect');
+const { ProcWatch, findClawdPid, ssAvailable } = require('./proc-watch');
 
 const HELP = `
-clawd-rain — Matrix-rain terminal viewer for the openclaw agent
+clawd-rain — Hacker-rain terminal viewer for the openclaw agent
+
+Watches three streams at once and renders them as falling rain:
+  • clawd's JSONL log (tool calls, LLM inference, channel messages)
+  • shell commands clawd spawns (every child process)
+  • TCP connections clawd opens (every outgoing socket)
 
 Usage:
-  clawd-rain                              auto-detect clawd's log source
-  clawd-rain --file /path/to/agent.log    tail an explicit file
+  clawd-rain                              auto-detect everything
+  clawd-rain --file /path/to/agent.log    explicit log file
   clawd-rain --journal openclaw-gateway   follow a systemd unit
+  clawd-rain --watch-pid 1234             watch a specific PID's procs/sockets
+  clawd-rain --no-watch                   log only, skip proc/net watching
   some-cmd | clawd-rain                   read JSONL from stdin
 
 Auto-detection probes (in order):
-  1. ~/.openclaw/openclaw.json -> logging.file (config override)
-  2. systemd unit /openclaw-gateway|openclaw|clawd/  (system, then user)
-  3. /tmp/openclaw/openclaw-YYYY-MM-DD.log  (default openclaw log dir, follows rotation)
-  4. journalctl -t openclaw  (syslog identifier)
-  5. stdin (if piped)
+  Log:
+    1. ~/.openclaw/openclaw.json -> logging.file (config override)
+    2. systemd unit /openclaw-gateway|openclaw|clawd/  (system, then user)
+    3. /tmp/openclaw/openclaw-YYYY-MM-DD.log  (default openclaw log dir)
+    4. journalctl -t openclaw  (syslog identifier)
+    5. stdin (if piped)
+  Process/network:
+    1. pgrep -f openclaw-gateway / openclaw / clawd
+    2. systemctl MainPID for openclaw-gateway
 
 Options:
-  --file <path>     tail an explicit log file (overrides auto-detect)
-  --journal <unit>  follow a systemd unit (overrides auto-detect)
-  --source <type>   stdin | file | journal  (force a specific source)
-  --title <name>    name shown in status bar (default: clawd)
-  --frame-ms <n>    frame interval in ms (default: 60)
-  --explain         print what auto-detect would pick, then exit
-  -h, --help        show this help
+  --file <path>      tail an explicit log file (overrides auto-detect)
+  --journal <unit>   follow a systemd unit (overrides auto-detect)
+  --source <type>    stdin | file | journal  (force a specific source)
+  --watch-pid <pid>  watch this PID for spawned processes + TCP conns
+  --no-watch         disable proc/net watching even if a PID is found
+  --watch-ms <n>     proc/net poll interval in ms (default: 750)
+  --title <name>     name shown in status bar (default: clawd)
+  --frame-ms <n>     frame interval in ms (default: 60)
+  --explain          print what auto-detect would pick, then exit
+  -h, --help         show this help
 `;
 
 function parse() {
   const { values } = parseArgs({
     options: {
-      source:     { type: 'string' },
-      file:       { type: 'string' },
-      journal:    { type: 'string' },
-      title:      { type: 'string' },
-      'frame-ms': { type: 'string' },
-      explain:    { type: 'boolean' },
-      help:       { type: 'boolean', short: 'h' },
+      source:      { type: 'string' },
+      file:        { type: 'string' },
+      journal:     { type: 'string' },
+      title:       { type: 'string' },
+      'frame-ms':  { type: 'string' },
+      'watch-pid': { type: 'string' },
+      'watch-ms':  { type: 'string' },
+      'no-watch':  { type: 'boolean' },
+      explain:     { type: 'boolean' },
+      help:        { type: 'boolean', short: 'h' },
     },
     allowPositionals: false,
     strict: true,
@@ -67,6 +85,9 @@ function parse() {
     journal: values.journal,
     title: values.title || 'clawd',
     frameMs: values['frame-ms'] ? Math.max(20, Number(values['frame-ms'])) : 60,
+    watchPid: values['watch-pid'] ? parseInt(values['watch-pid'], 10) : null,
+    watchMs: values['watch-ms'] ? Math.max(200, Number(values['watch-ms'])) : 750,
+    noWatch: !!values['no-watch'],
     explain: !!values.explain,
   };
 }
@@ -90,16 +111,11 @@ function main() {
     else if (opts.source === 'stdin') sourceLabel = 'stdin';
   } else {
     const detected = autodetect.detect();
-    if (opts.explain) {
-      if (detected) {
-        process.stdout.write(`clawd-rain would use: ${detected.label}\n`);
-      } else {
-        process.stdout.write('clawd-rain found nothing to attach to.\n');
-      }
-      process.stdout.write('\n' + autodetect.describeSearched() + '\n');
-      process.exit(detected ? 0 : 1);
-    }
     if (!detected) {
+      if (opts.explain) {
+        process.stdout.write('clawd-rain found no log source.\n\n' + autodetect.describeSearched() + '\n');
+        process.exit(1);
+      }
       process.stderr.write('clawd-rain: could not find clawd to follow.\n\n');
       process.stderr.write(autodetect.describeSearched() + '\n');
       process.exit(1);
@@ -108,8 +124,19 @@ function main() {
     sourceLabel = detected.label;
   }
 
+  let watchPid = opts.watchPid;
+  if (!opts.noWatch && !watchPid) watchPid = findClawdPid();
+
   if (opts.explain) {
-    process.stdout.write(`clawd-rain would use: ${sourceLabel}\n`);
+    process.stdout.write(`Log source:    ${sourceLabel}\n`);
+    if (opts.noWatch) {
+      process.stdout.write('Proc/net watch: disabled (--no-watch)\n');
+    } else if (!watchPid) {
+      process.stdout.write('Proc/net watch: not enabled (no clawd PID found)\n');
+    } else {
+      process.stdout.write(`Proc/net watch: pid ${watchPid}${ssAvailable() ? ' (ss available)' : ' (ss missing — net disabled)'}\n`);
+    }
+    process.stdout.write('\n' + autodetect.describeSearched() + '\n');
     process.exit(0);
   }
 
@@ -121,27 +148,41 @@ function main() {
   const w = process.stdout.columns || 80;
   const h = process.stdout.rows || 24;
   const rain = new Rain(w, rainHeightFor(h));
+
+  let displaySource = sourceLabel;
+  if (watchPid) displaySource += ` + proc:${watchPid}`;
+
   const renderer = new Renderer(rain, {
     title: opts.title,
-    source: sourceLabel,
+    source: displaySource,
     frameMs: opts.frameMs,
   });
 
-  ingest.on('line', (line) => {
+  const handleLine = (line) => {
     const evt = categorize(line);
     if (!evt) return;
     renderer.pushEvent(evt);
     rain.injectDecoded(`${evt.label} ${evt.text}`, evt.kind);
-  });
+  };
+
+  ingest.on('line', handleLine);
   ingest.on('status', (c) => renderer.setConnected(c));
 
-  setupInput(renderer, ingest);
+  let procWatch = null;
+  if (!opts.noWatch && watchPid) {
+    procWatch = new ProcWatch({ pid: watchPid, intervalMs: opts.watchMs });
+    procWatch.on('line', handleLine);
+  }
+
+  setupInput(renderer, ingest, procWatch);
   renderer.start();
   ingest.start();
+  if (procWatch) procWatch.start();
 }
 
-function setupInput(renderer, ingest) {
+function setupInput(renderer, ingest, procWatch) {
   const shutdown = (code) => {
+    try { if (procWatch) procWatch.stop(); } catch (_) {}
     try { ingest.stop(); } catch (_) {}
     try { renderer.stop(); } catch (_) {}
     process.exit(code || 0);
