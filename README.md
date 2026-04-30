@@ -122,6 +122,7 @@ Generates realistic openclaw-format JSONL events (tool calls, model inference, c
 | `--watch-ms <n>` | proc/net poll interval in ms | `750` |
 | `--chat-agent <id>` | enable chat input via `openclaw agent --agent <id>` | — |
 | `--chat-cmd <cmd>` | enable chat input via custom command (text appended as last argv) | — |
+| `--chat-timeout <s>` | kill an in-flight send after this many seconds | `30` |
 | `--title <name>` | name shown in status bar | `clawd` |
 | `--frame-ms <n>` | frame interval (lower = smoother, more CPU) | `60` |
 | `--explain` | print what auto-detect would pick, then exit | — |
@@ -135,11 +136,14 @@ clawd-rain has a built-in chat input bar at the bottom of the screen. Press `/` 
 openclaw agent --agent <id> --deliver --message "<your text>"
 ```
 
-Pass `--chat-agent <id>` to enable it. The `<id>` is your openclaw agent's fully-qualified ID — typically in the form `agent:<workspace>:<name>`. List yours with `openclaw agent list` if you don't know it.
+Pass `--chat-agent <id>` to enable it. List yours first to get the right format:
 
 ```sh
-clawd-rain --chat-agent agent:main:main
+openclaw agent list                        # find the actual IDs registered
+clawd-rain --chat-agent <one-of-those-ids>
 ```
+
+If you pass an ID openclaw doesn't recognise, it logs `EMBEDDED FALLBACK: Gateway agent failed; running embedded agent: Error: Unknown agent id "..."` to stderr — clawd-rain now streams stderr in real time so you'll see that error fall as a red `[ERR ]` stream within a second of pressing Enter, rather than hanging on `sending…`. Bad sends auto-terminate after `--chat-timeout` seconds (default 30); pressing `Esc` while a send is in flight cancels it immediately.
 
 When you send, you see your message echoed in the rain as a `[CHAT] [me] → "..."` stream. The agent's reply flows back through the openclaw log — clawd-rain is already tailing it, so the response shows up automatically as a `[CHAN]` stream a moment later. One terminal, full conversation loop.
 

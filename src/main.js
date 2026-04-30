@@ -57,6 +57,8 @@ Options:
   --chat-cmd <cmd>    enable chat input via custom command; the message
                       text is appended as the final argv. Use shell-style
                       quoting for args, e.g. 'curl -X POST http://...'
+  --chat-timeout <s>  kill an in-flight send after this many seconds
+                      (default: 30). Esc also cancels.
   --title <name>      name shown in status bar (default: clawd)
   --frame-ms <n>      frame interval in ms (default: 60)
   --explain           print what auto-detect would pick, then exit
@@ -74,8 +76,9 @@ function parse() {
       'watch-pid':  { type: 'string' },
       'watch-ms':   { type: 'string' },
       'no-watch':   { type: 'boolean' },
-      'chat-agent': { type: 'string' },
-      'chat-cmd':   { type: 'string' },
+      'chat-agent':   { type: 'string' },
+      'chat-cmd':     { type: 'string' },
+      'chat-timeout': { type: 'string' },
       explain:      { type: 'boolean' },
       help:         { type: 'boolean', short: 'h' },
     },
@@ -107,6 +110,7 @@ function parse() {
     noWatch: !!values['no-watch'],
     chatAgent: values['chat-agent'] || '',
     chatCmd: values['chat-cmd'] || '',
+    chatTimeoutMs: values['chat-timeout'] ? Math.max(2000, Number(values['chat-timeout']) * 1000) : 30000,
     explain: !!values.explain,
   };
 }
@@ -249,41 +253,108 @@ function main() {
     rain.injectDecoded(`${evt.label} ${evt.text}`, evt.kind);
   };
 
+  let activeSend = null;
+
+  const cancelActiveSend = (reason) => {
+    if (!activeSend) return false;
+    const { proc, killTimer, hardKillTimer } = activeSend;
+    if (killTimer) clearTimeout(killTimer);
+    if (hardKillTimer) clearTimeout(hardKillTimer);
+    try { proc.kill('SIGTERM'); } catch (_) {}
+    setTimeout(() => { try { proc.kill('SIGKILL'); } catch (_) {} }, 1500);
+    chat.setBusy(false);
+    chat.setError(reason || 'cancelled');
+    echoError(reason || 'cancelled');
+    activeSend = null;
+    return true;
+  };
+
   const sendChat = (text) => {
     const cmd = buildSendCommand(opts, text);
     if (!cmd) {
       chat.setError('no --chat-agent or --chat-cmd configured');
       return;
     }
+    if (activeSend) {
+      chat.setError('previous send still in flight (esc to cancel)');
+      return;
+    }
     chat.setBusy(true);
     chat.setError('');
+    echoSent(text);
+
     let stdoutBuf = '';
     let stderrBuf = '';
+    let proc;
     try {
-      const proc = spawn(cmd.cmd, cmd.args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      proc.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
-      proc.stderr.on('data', (d) => { stderrBuf += d.toString(); });
-      proc.on('close', (code) => {
-        chat.setBusy(false);
-        if (code === 0) {
-          chat.setSent(text);
-          echoSent(text);
-        } else {
-          const reason = (stderrBuf || stdoutBuf || `exit ${code}`).trim().split('\n')[0].slice(0, 200);
-          chat.setError(reason);
-          echoError(`send failed: ${reason}`);
-        }
-      });
-      proc.on('error', (err) => {
-        chat.setBusy(false);
-        chat.setError(err.message);
-        echoError(`spawn ${cmd.cmd}: ${err.message}`);
-      });
+      proc = spawn(cmd.cmd, cmd.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       chat.setBusy(false);
       chat.setError(err.message);
       echoError(`spawn ${cmd.cmd}: ${err.message}`);
+      return;
     }
+
+    const lineFlush = (buf, cb) => {
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).replace(/\r$/, '').trim();
+        buf = buf.slice(idx + 1);
+        if (line) cb(line);
+      }
+      return buf;
+    };
+
+    proc.stdout.on('data', (d) => {
+      stdoutBuf += d.toString();
+      stdoutBuf = lineFlush(stdoutBuf, (line) => {
+        chat.setError('');
+        echoError(`out: ${line.slice(0, 200)}`);
+      });
+    });
+
+    proc.stderr.on('data', (d) => {
+      stderrBuf += d.toString();
+      stderrBuf = lineFlush(stderrBuf, (line) => {
+        const trimmed = line.slice(0, 200);
+        chat.setError(trimmed);
+        echoError(trimmed);
+      });
+    });
+
+    const killTimer = setTimeout(() => {
+      if (activeSend && activeSend.proc === proc) {
+        cancelActiveSend(`timed out after ${Math.round(opts.chatTimeoutMs / 1000)}s — kill -TERM`);
+      }
+    }, opts.chatTimeoutMs);
+
+    activeSend = { proc, killTimer, hardKillTimer: null };
+
+    proc.on('close', (code) => {
+      clearTimeout(killTimer);
+      if (activeSend && activeSend.proc !== proc) return;
+      activeSend = null;
+      chat.setBusy(false);
+      if (stdoutBuf.trim()) echoError(`out: ${stdoutBuf.trim().slice(0, 200)}`);
+      if (stderrBuf.trim()) {
+        const tail = stderrBuf.trim().slice(0, 200);
+        chat.setError(tail);
+        echoError(tail);
+      }
+      if (code === 0) {
+        chat.setSent(text);
+      } else if (code != null) {
+        chat.setError(chat.lastError || `exit ${code}`);
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(killTimer);
+      activeSend = null;
+      chat.setBusy(false);
+      chat.setError(err.message);
+      echoError(`spawn ${cmd.cmd}: ${err.message}`);
+    });
   };
 
   ingest.on('line', handleLine);
@@ -295,7 +366,7 @@ function main() {
     procWatch.on('line', handleLine);
   }
 
-  setupInput(renderer, chat, sendChat, ingest, procWatch);
+  setupInput(renderer, chat, sendChat, cancelActiveSend, ingest, procWatch);
   renderer.start();
   ingest.start();
   if (procWatch) procWatch.start();
@@ -306,8 +377,9 @@ function quoteIfNeeded(s) {
   return `"${s.replace(/"/g, '\\"')}"`;
 }
 
-function setupInput(renderer, chat, sendChat, ingest, procWatch) {
+function setupInput(renderer, chat, sendChat, cancelActiveSend, ingest, procWatch) {
   const shutdown = (code) => {
+    try { cancelActiveSend('shutting down'); } catch (_) {}
     try { if (procWatch) procWatch.stop(); } catch (_) {}
     try { ingest.stop(); } catch (_) {}
     try { renderer.stop(); } catch (_) {}
@@ -322,6 +394,10 @@ function setupInput(renderer, chat, sendChat, ingest, procWatch) {
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (key) => {
+      if (key === '\x1b' && !chat.focused && chat.busy) {
+        cancelActiveSend('cancelled by user');
+        return;
+      }
       const handled = chat.handleKey(key);
       if (handled) {
         if (handled.kind === 'quit') return shutdown(0);
