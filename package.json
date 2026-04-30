@@ -1,7 +1,7 @@
 {
   "name": "clawd-rain",
-  "version": "0.3.0",
-  "description": "Matrix-rain terminal viewer for the openclaw agent. Every falling character is a real openclaw log line — no random garbage, just telemetry rendered fast enough to look like rain.",
+  "version": "0.4.0",
+  "description": "Hacker-rain terminal viewer for the openclaw agent. Real-time stream of every shell command, TCP connection, and log entry the clawd process produces — rendered as falling text so you can watch the agent work.",
   "bin": {
     "clawd-rain": "bin/clawd-rain"
   },
