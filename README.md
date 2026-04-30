@@ -135,10 +135,10 @@ clawd-rain has a built-in chat input bar at the bottom of the screen. Press `/` 
 openclaw agent --agent <id> --deliver --message "<your text>"
 ```
 
-Pass `--chat-agent <id>` to enable it:
+Pass `--chat-agent <id>` to enable it. The `<id>` is your openclaw agent's fully-qualified ID — typically in the form `agent:<workspace>:<name>`. List yours with `openclaw agent list` if you don't know it.
 
 ```sh
-clawd-rain --chat-agent default
+clawd-rain --chat-agent agent:main:main
 ```
 
 When you send, you see your message echoed in the rain as a `[CHAT] [me] → "..."` stream. The agent's reply flows back through the openclaw log — clawd-rain is already tailing it, so the response shows up automatically as a `[CHAN]` stream a moment later. One terminal, full conversation loop.

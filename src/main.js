@@ -21,7 +21,7 @@ Watches multiple streams at once and renders them as falling rain:
 
 Usage:
   clawd-rain                              auto-detect everything
-  clawd-rain --chat-agent <id>            enable chat with a specific agent
+  clawd-rain --chat-agent agent:main:main enable chat with a specific agent
   clawd-rain --file /path/to/agent.log    explicit log file
   clawd-rain --journal openclaw-gateway   follow a systemd unit
   clawd-rain --watch-pid 1234             watch a specific PID's procs/sockets
