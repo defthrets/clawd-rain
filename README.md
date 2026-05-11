@@ -267,4 +267,3 @@ clawd-rain/
 - File-tailing follows daily rotation: when `openclaw-2026-04-27.log` appears, clawd-rain switches to it without restart.
 
 ---
-*Co-authored by Clawd <clawd@qloak.me>
