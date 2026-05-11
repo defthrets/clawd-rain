@@ -265,3 +265,6 @@ clawd-rain/
 - Uses the alternate screen buffer — quitting restores your original terminal contents.
 - Designed to run on the homelab next to clawd. SSH into the box and run it in tmux/screen.
 - File-tailing follows daily rotation: when `openclaw-2026-04-27.log` appears, clawd-rain switches to it without restart.
+
+---
+*Co-authored by Clawd <clawd@qloak.me>
