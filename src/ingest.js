@@ -61,6 +61,9 @@ class FileIngest extends Ingest {
   }
 
   _open(seekEnd) {
+    // Clean up any prior retry timer + poll to avoid leaks on rapid reopen
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    if (this._poll) { clearInterval(this._poll); this._poll = null; }
     fs.open(this.path, 'r', (err, fd) => {
       if (err) {
         this._setConnected(false);
